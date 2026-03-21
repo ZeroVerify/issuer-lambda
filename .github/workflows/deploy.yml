@@ -9,6 +9,9 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  AWS_REGIONS: "us-east-1,us-west-2"
+
 jobs:
   deploy:
     name: Build and Deploy
@@ -34,13 +37,21 @@ jobs:
           role-to-assume: arn:aws:iam::043189681060:role/ZeroVerifyGitHubActionsLambdaDeployment
           aws-region: us-east-1
 
-      - name: Upload to S3
+      - name: Deploy to all regions
         run: |
-          aws s3 cp issuer-lambda.zip s3://zeroverify-deployment-artifacts/lambda/issuer-lambda.zip
+          IFS=',' read -ra REGIONS <<< "$AWS_REGIONS"
+          for region in "${REGIONS[@]}"; do
+            echo "Deploying to $region..."
 
-      - name: Update Lambda Function
-        run: |
-          aws lambda update-function-code \
-            --function-name zeroverify-issuer \
-            --s3-bucket zeroverify-deployment-artifacts \
-            --s3-key lambda/issuer-lambda.zip
+            bucket_name="zeroverify-deployment-artifacts-${region}"
+
+            aws s3 cp issuer-lambda.zip s3://${bucket_name}/lambda/issuer-lambda.zip --region $region
+
+            aws lambda update-function-code \
+              --function-name zeroverify-issuer \
+              --s3-bucket ${bucket_name} \
+              --s3-key lambda/issuer-lambda.zip \
+              --region $region
+
+            echo "Successfully deployed to $region"
+          done
