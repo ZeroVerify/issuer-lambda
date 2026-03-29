@@ -21,8 +21,8 @@ func New(svc *service.CredentialService) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) Handle(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	if req.HTTPMethod != http.MethodPost || req.Path != "/api/v1/credentials/issue" {
+func (h *Handler) Handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	if req.RequestContext.HTTP.Method != http.MethodPost || req.RequestContext.HTTP.Path != "/api/v1/credentials/issue" {
 		return errResponse(http.StatusNotFound, "not_found", "endpoint not found"), nil
 	}
 
@@ -43,7 +43,7 @@ func (h *Handler) Handle(ctx context.Context, req events.APIGatewayProxyRequest)
 	return jsonResponse(http.StatusCreated, models.IssueCredentialResponse{Credential: vc}), nil
 }
 
-func (h *Handler) mapError(err error) events.APIGatewayProxyResponse {
+func (h *Handler) mapError(err error) events.APIGatewayV2HTTPResponse {
 	switch {
 	case errors.Is(err, domain.ErrDuplicateCredential):
 		return errResponse(http.StatusConflict, "duplicate_credential",
@@ -66,16 +66,16 @@ func (h *Handler) mapError(err error) events.APIGatewayProxyResponse {
 	}
 }
 
-func jsonResponse(statusCode int, body any) events.APIGatewayProxyResponse {
+func jsonResponse(statusCode int, body any) events.APIGatewayV2HTTPResponse {
 	b, _ := json.Marshal(body)
-	return events.APIGatewayProxyResponse{
+	return events.APIGatewayV2HTTPResponse{
 		StatusCode: statusCode,
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		Body:       string(b),
 	}
 }
 
-func errResponse(statusCode int, errCode, message string) events.APIGatewayProxyResponse {
+func errResponse(statusCode int, errCode, message string) events.APIGatewayV2HTTPResponse {
 	return jsonResponse(statusCode, models.ErrorResponse{
 		Error:   errCode,
 		Message: message,
