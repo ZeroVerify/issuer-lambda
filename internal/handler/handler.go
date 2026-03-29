@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -61,6 +62,7 @@ func (h *Handler) mapError(err error) events.APIGatewayV2HTTPResponse {
 		return errResponse(http.StatusServiceUnavailable, "service_unavailable",
 			"credential issuance temporarily unavailable, try again later")
 	default:
+		log.Printf("ERROR: unhandled error: %v", err)
 		return errResponse(http.StatusInternalServerError, "internal_error",
 			"an unexpected error occurred")
 	}
