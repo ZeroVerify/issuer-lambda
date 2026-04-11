@@ -129,7 +129,7 @@ func buildCredential(
 		fieldSigs[name] = sig
 	}
 
-	bitstringBase := "https://s3.amazonaws.com/zeroverify-metadata/bitstring/v1/bitstring.gz"
+	bitstringBase := "https://artifacts.api.zeroverify.net/bitstring/v1/bitstring.gz"
 
 	vc := &domain.VerifiableCredential{
 		Context: []string{
