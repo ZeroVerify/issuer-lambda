@@ -62,10 +62,17 @@ type StatusEntry struct {
 	StatusListCredential string `json:"statusListCredential"`
 }
 
+type CircuitSignature struct {
+	R8x string `json:"R8x"`
+	R8y string `json:"R8y"`
+	S   string `json:"S"`
+}
+
 type Proof struct {
-	Type               string            `json:"type"`
-	Created            string            `json:"created"`
-	VerificationMethod string            `json:"verificationMethod"`
-	ProofPurpose       string            `json:"proofPurpose"`
-	FieldSignatures    map[string]string `json:"fieldSignatures"`
+	Type                string            `json:"type"`
+	Created             string            `json:"created"`
+	VerificationMethod  string            `json:"verificationMethod"`
+	ProofPurpose        string            `json:"proofPurpose"`
+	FieldSignatures     map[string]string `json:"fieldSignatures"`
+	CredentialSignature CircuitSignature  `json:"credentialSignature"`
 }

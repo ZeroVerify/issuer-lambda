@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/iden3/go-iden3-crypto/babyjub"
+	"github.com/iden3/go-iden3-crypto/poseidon"
 )
 
 type BabyJubJubSigner struct {
@@ -27,6 +28,30 @@ func (s *BabyJubJubSigner) SignField(value string) (string, error) {
 	sig := s.privateKey.SignPoseidon(msg)
 	compressed := sig.Compress()
 	return base64.StdEncoding.EncodeToString(compressed[:]), nil
+}
+
+func (s *BabyJubJubSigner) SignStudentCredential(
+	subjectPseudonym *big.Int,
+	enrollmentStatus string,
+	issuedAt, expiresAt int64,
+) (CircuitSignature, error) {
+	msgHash, err := poseidon.Hash([]*big.Int{
+		subjectPseudonym,
+		fieldElement(enrollmentStatus),
+		big.NewInt(issuedAt),
+		big.NewInt(expiresAt),
+	})
+	if err != nil {
+		return CircuitSignature{}, fmt.Errorf("%w: poseidon hash: %v", ErrSignatureFailed, err)
+	}
+
+	sig := s.privateKey.SignPoseidon(msgHash)
+
+	return CircuitSignature{
+		R8x: sig.R8.X.String(),
+		R8y: sig.R8.Y.String(),
+		S:   sig.S.String(),
+	}, nil
 }
 
 func (s *BabyJubJubSigner) PublicKeyHex() string {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
@@ -85,7 +86,12 @@ func (s *CredentialService) IssueCredential(
 	now := time.Now().UTC()
 	expiresAt := now.AddDate(0, 0, s.cfg.CredentialTTLDays)
 
-	vc, err := buildCredential(credentialID, s.cfg.IssuerDID, subjectID, token, revocationIndex, signer, now, expiresAt)
+	subjectPseudonymFE, err := domain.SubjectPseudonymFieldElement(subjectID)
+	if err != nil {
+		return nil, fmt.Errorf("computing subject pseudonym field element: %w", err)
+	}
+
+	vc, err := buildCredential(credentialID, s.cfg.IssuerDID, subjectID, subjectPseudonymFE, token, revocationIndex, signer, now, expiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +114,7 @@ func (s *CredentialService) IssueCredential(
 
 func buildCredential(
 	credentialID, issuerDID, subjectID string,
+	subjectPseudonymFE *big.Int,
 	token *domain.OIDCToken,
 	revocationIndex int,
 	signer *domain.BabyJubJubSigner,
@@ -127,6 +134,11 @@ func buildCredential(
 			return nil, fmt.Errorf("signing field %q: %w", name, err)
 		}
 		fieldSigs[name] = sig
+	}
+
+	credSig, err := signer.SignStudentCredential(subjectPseudonymFE, token.EnrollmentStatus, issuedAt.Unix(), expiresAt.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("signing student credential: %w", err)
 	}
 
 	bitstringBase := "https://artifacts.api.zeroverify.net/bitstring/v1/bitstring.gz"
@@ -154,11 +166,12 @@ func buildCredential(
 			StatusListCredential: bitstringBase,
 		},
 		Proof: domain.Proof{
-			Type:               "BabyJubJubSignature2024",
-			Created:            issuedAt.Format(time.RFC3339),
-			VerificationMethod: fmt.Sprintf("%s#babyjubjub-key-1", issuerDID),
-			ProofPurpose:       "assertionMethod",
-			FieldSignatures:    fieldSigs,
+			Type:                "BabyJubJubSignature2024",
+			Created:             issuedAt.Format(time.RFC3339),
+			VerificationMethod:  fmt.Sprintf("%s#babyjubjub-key-1", issuerDID),
+			ProofPurpose:        "assertionMethod",
+			FieldSignatures:     fieldSigs,
+			CredentialSignature: credSig,
 		},
 	}
 
