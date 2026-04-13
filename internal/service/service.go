@@ -136,9 +136,14 @@ func buildCredential(
 		fieldSigs[name] = sig
 	}
 
-	credSig, err := signer.SignStudentCredential(subjectPseudonymFE, token.EnrollmentStatus, issuedAt.Unix(), expiresAt.Unix())
+	studentSig, err := signer.SignStudentCredential(subjectPseudonymFE, token.EnrollmentStatus, issuedAt.Unix(), expiresAt.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("signing student credential: %w", err)
+	}
+
+	revocationSig, err := signer.SignRevocation(credentialID)
+	if err != nil {
+		return nil, fmt.Errorf("signing revocation: %w", err)
 	}
 
 	bitstringBase := "https://artifacts.api.zeroverify.net/bitstring/v1/bitstring.gz"
@@ -166,12 +171,15 @@ func buildCredential(
 			StatusListCredential: bitstringBase,
 		},
 		Proof: domain.Proof{
-			Type:                "BabyJubJubSignature2024",
-			Created:             issuedAt.Format(time.RFC3339),
-			VerificationMethod:  fmt.Sprintf("%s#babyjubjub-key-1", issuerDID),
-			ProofPurpose:        "assertionMethod",
-			FieldSignatures:     fieldSigs,
-			CredentialSignature: credSig,
+			Type:               "BabyJubJubSignature2024",
+			Created:            issuedAt.Format(time.RFC3339),
+			VerificationMethod: fmt.Sprintf("%s#babyjubjub-key-1", issuerDID),
+			ProofPurpose:       "assertionMethod",
+			FieldSignatures:    fieldSigs,
+			CircuitSignatures: map[string]string{
+				"student_status":        studentSig,
+				"credential_revocation": revocationSig,
+			},
 		},
 	}
 

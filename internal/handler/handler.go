@@ -23,6 +23,8 @@ func New(svc *service.CredentialService) *Handler {
 }
 
 func (h *Handler) Handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	log.Printf("INFO: %s %s", req.RequestContext.HTTP.Method, req.RequestContext.HTTP.Path)
+
 	if req.RequestContext.HTTP.Method != http.MethodPost || req.RequestContext.HTTP.Path != "/api/v1/credentials/issue" {
 		return errResponse(http.StatusNotFound, "not_found", "endpoint not found"), nil
 	}
@@ -38,9 +40,11 @@ func (h *Handler) Handle(ctx context.Context, req events.APIGatewayV2HTTPRequest
 
 	vc, err := h.svc.IssueCredential(ctx, body.AuthorizationCode, body.CodeVerifier)
 	if err != nil {
+		log.Printf("WARN: credential issuance failed: %v", err)
 		return h.mapError(err), nil
 	}
 
+	log.Printf("INFO: credential issued id=%s", vc.ID)
 	return jsonResponse(http.StatusCreated, models.IssueCredentialResponse{Credential: vc}), nil
 }
 

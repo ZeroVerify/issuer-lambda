@@ -34,7 +34,7 @@ func (s *BabyJubJubSigner) SignStudentCredential(
 	subjectPseudonym *big.Int,
 	enrollmentStatus string,
 	issuedAt, expiresAt int64,
-) (CircuitSignature, error) {
+) (string, error) {
 	msgHash, err := poseidon.Hash([]*big.Int{
 		subjectPseudonym,
 		fieldElement(enrollmentStatus),
@@ -42,16 +42,19 @@ func (s *BabyJubJubSigner) SignStudentCredential(
 		big.NewInt(expiresAt),
 	})
 	if err != nil {
-		return CircuitSignature{}, fmt.Errorf("%w: poseidon hash: %v", ErrSignatureFailed, err)
+		return "", fmt.Errorf("%w: poseidon hash: %v", ErrSignatureFailed, err)
 	}
 
 	sig := s.privateKey.SignPoseidon(msgHash)
+	compressed := sig.Compress()
+	return base64.StdEncoding.EncodeToString(compressed[:]), nil
+}
 
-	return CircuitSignature{
-		R8x: sig.R8.X.String(),
-		R8y: sig.R8.Y.String(),
-		S:   sig.S.String(),
-	}, nil
+func (s *BabyJubJubSigner) SignRevocation(credentialID string) (string, error) {
+	msg := fieldElement(credentialID)
+	sig := s.privateKey.SignPoseidon(msg)
+	compressed := sig.Compress()
+	return base64.StdEncoding.EncodeToString(compressed[:]), nil
 }
 
 func (s *BabyJubJubSigner) PublicKeyHex() string {
