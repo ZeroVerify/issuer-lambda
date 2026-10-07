@@ -136,7 +136,7 @@ func buildCredential(
 		fieldSigs[name] = sig
 	}
 
-	studentSig, err := signer.SignStudentCredential(subjectPseudonymFE, token.EnrollmentStatus, issuedAt.Unix(), expiresAt.Unix())
+	studentSig, err := signer.SignStudentCredential(subjectPseudonymFE, token.EnrollmentStatus, issuedAt.Unix(), expiresAt.Unix(), revocationIndex)
 	if err != nil {
 		return nil, fmt.Errorf("signing student credential: %w", err)
 	}
