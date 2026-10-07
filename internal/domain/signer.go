@@ -34,12 +34,14 @@ func (s *BabyJubJubSigner) SignStudentCredential(
 	subjectPseudonym *big.Int,
 	enrollmentStatus string,
 	issuedAt, expiresAt int64,
+	revocationIndex int,
 ) (string, error) {
 	msgHash, err := poseidon.Hash([]*big.Int{
 		subjectPseudonym,
 		fieldElement(enrollmentStatus),
 		big.NewInt(issuedAt),
 		big.NewInt(expiresAt),
+		big.NewInt(int64(revocationIndex)),
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: poseidon hash: %v", ErrSignatureFailed, err)
