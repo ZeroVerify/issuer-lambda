@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 	"time"
@@ -59,6 +60,14 @@ func (s *CredentialService) IssueCredential(
 	}
 	subjectID := domain.ComputePseudonymousSubjectID(token.IdPID, token.Username, hmacKey)
 
+	// The duplicate check below is a read followed by a write. The lock makes it atomic per subject: without it two
+	// simultaneous requests for one person both pass the check and both get a credential.
+	credentialID := uuid.New().String()
+	if err := s.creds.AcquireIssuanceLock(ctx, subjectID, credentialID, issuanceLockTTL); err != nil {
+		return nil, err
+	}
+	defer s.releaseIssuanceLock(subjectID, credentialID)
+
 	dedupWindow := time.Duration(s.cfg.DeduplicationWindowDays) * 24 * time.Hour
 	existing, err := s.creds.FindActiveBySubjectID(ctx, subjectID, time.Now().Add(-dedupWindow))
 	if err != nil {
@@ -77,7 +86,6 @@ func (s *CredentialService) IssueCredential(
 		return nil, err
 	}
 
-	credentialID := uuid.New().String()
 	revocationIndex, err := s.bits.ClaimFreeIndex(ctx, credentialID, s.cfg.BitIndexMaxRetries)
 	if err != nil {
 		return nil, err
@@ -110,6 +118,18 @@ func (s *CredentialService) IssueCredential(
 	}
 
 	return vc, nil
+}
+
+// issuanceLockTTL bounds how long a crashed invocation can block the same person; the Lambda timeout is 30 s.
+const issuanceLockTTL = 60 * time.Second
+
+// releaseIssuanceLock uses its own short context so it still runs when the request context is already cancelled.
+func (s *CredentialService) releaseIssuanceLock(subjectID, owner string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.creds.ReleaseIssuanceLock(ctx, subjectID, owner); err != nil {
+		log.Printf("WARN: releasing issuance lock failed (it expires on its own): %v", err)
+	}
 }
 
 func buildCredential(
