@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -14,18 +15,77 @@ import (
 	"github.com/ZeroVerify/issuer-lambda/internal/domain"
 )
 
+// issuanceLockSortKey is the sort key of the per-subject lock row. It lives in the credentials table so it needs no new
+// resource. The row has no status attribute, so FindActiveBySubjectID never returns it, and free-lambda ignores its
+// INSERT and non-TTL REMOVE stream events (a TTL REMOVE has no revocation_index and is skipped).
+const issuanceLockSortKey = "LOCK#issuance"
+
+// CredentialStore reads and writes the primary region only. The dedup check must see the latest write, and a
+// replica in another region can lag it, so there is deliberately no local-region read client.
 type CredentialStore struct {
-	readClient  *dynamodb.Client
-	writeClient *dynamodb.Client
-	tableName   string
+	client    *dynamodb.Client
+	tableName string
 }
 
-func NewCredentialStore(localCfg, primaryCfg aws.Config, tableName string) *CredentialStore {
+func NewCredentialStore(_ aws.Config, primaryCfg aws.Config, tableName string) *CredentialStore {
 	return &CredentialStore{
-		readClient:  dynamodb.NewFromConfig(localCfg),
-		writeClient: dynamodb.NewFromConfig(primaryCfg),
-		tableName:   tableName,
+		client:    dynamodb.NewFromConfig(primaryCfg),
+		tableName: tableName,
 	}
+}
+
+// AcquireIssuanceLock serialises issuance for one subject. Two simultaneous requests for the same person used to both
+// pass the read-then-write duplicate check; with the lock only one proceeds and the other gets ErrDuplicateCredential.
+// A lock whose expires_at has passed (a crashed Lambda) is taken over.
+func (s *CredentialStore) AcquireIssuanceLock(ctx context.Context, subjectID, owner string, ttl time.Duration) error {
+	now := time.Now()
+	_, err := s.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item: map[string]types.AttributeValue{
+			"subject_id":    &types.AttributeValueMemberS{Value: subjectID},
+			"credential_id": &types.AttributeValueMemberS{Value: issuanceLockSortKey},
+			"locked_by":     &types.AttributeValueMemberS{Value: owner},
+			"expires_at":    &types.AttributeValueMemberN{Value: strconv.FormatInt(now.Add(ttl).Unix(), 10)},
+		},
+		ConditionExpression: aws.String("attribute_not_exists(subject_id) OR expires_at < :now"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":now": &types.AttributeValueMemberN{Value: strconv.FormatInt(now.Unix(), 10)},
+		},
+	})
+	if err != nil {
+		var ccfe *types.ConditionalCheckFailedException
+		if errors.As(err, &ccfe) {
+			return domain.ErrDuplicateCredential
+		}
+		return fmt.Errorf("acquiring issuance lock: %w", err)
+	}
+	return nil
+}
+
+// ReleaseIssuanceLock expires the lock if this owner still holds it. It updates instead of deleting because the issuer's
+// IAM role has no dynamodb:DeleteItem; an expired lock is taken over by the next request and removed by the table TTL.
+func (s *CredentialStore) ReleaseIssuanceLock(ctx context.Context, subjectID, owner string) error {
+	_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]types.AttributeValue{
+			"subject_id":    &types.AttributeValueMemberS{Value: subjectID},
+			"credential_id": &types.AttributeValueMemberS{Value: issuanceLockSortKey},
+		},
+		UpdateExpression:    aws.String("SET expires_at = :past"),
+		ConditionExpression: aws.String("locked_by = :owner"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":owner": &types.AttributeValueMemberS{Value: owner},
+			":past":  &types.AttributeValueMemberN{Value: strconv.FormatInt(time.Now().Add(-time.Second).Unix(), 10)},
+		},
+	})
+	if err != nil {
+		var ccfe *types.ConditionalCheckFailedException
+		if errors.As(err, &ccfe) {
+			return nil
+		}
+		return fmt.Errorf("releasing issuance lock: %w", err)
+	}
+	return nil
 }
 
 type credentialItem struct {
@@ -43,10 +103,11 @@ func (s *CredentialStore) FindActiveBySubjectID(
 	subjectID string,
 	issuedAfter time.Time,
 ) (*domain.CredentialRecord, error) {
-	out, err := s.readClient.Query(ctx, &dynamodb.QueryInput{
+	out, err := s.client.Query(ctx, &dynamodb.QueryInput{
 		TableName:              aws.String(s.tableName),
+		ConsistentRead:         aws.Bool(true),
 		KeyConditionExpression: aws.String("subject_id = :sid"),
-		FilterExpression: aws.String("#st = :active AND expires_at > :now AND issued_at > :issuedAfter"),
+		FilterExpression:       aws.String("#st = :active AND expires_at > :now AND issued_at > :issuedAfter"),
 		ExpressionAttributeNames: map[string]string{
 			"#st": "status",
 		},
@@ -89,7 +150,7 @@ func (s *CredentialStore) Insert(ctx context.Context, record *domain.CredentialR
 		return fmt.Errorf("marshalling credential record: %w", err)
 	}
 
-	_, err = s.writeClient.PutItem(ctx, &dynamodb.PutItemInput{
+	_, err = s.client.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(s.tableName),
 		Item:      av,
 	})
