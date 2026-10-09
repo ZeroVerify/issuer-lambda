@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/ZeroVerify/issuer-lambda/internal/adapters/dynamodb"
@@ -15,6 +17,8 @@ import (
 	"github.com/ZeroVerify/issuer-lambda/internal/service"
 )
 
+const awsAttemptTimeout = 4 * time.Second
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -23,8 +27,13 @@ func main() {
 
 	ctx := context.Background()
 
+	// A per-attempt timeout turns a dead keep-alive connection on a reused Lambda environment into a fast retry.
+	// Without it the SDK waits until the Lambda deadline (observed: a DynamoDB Scan hanging for the full 30 s).
+	httpClient := awshttp.NewBuildableClient().WithTimeout(awsAttemptTimeout)
+
 	localAwsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(cfg.AWSRegion),
+		awsconfig.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		log.Fatalf("loading local AWS config: %v", err)
@@ -32,6 +41,7 @@ func main() {
 
 	primaryAwsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(cfg.PrimaryRegion),
+		awsconfig.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		log.Fatalf("loading primary AWS config: %v", err)
